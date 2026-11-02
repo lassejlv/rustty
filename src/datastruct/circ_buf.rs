@@ -197,7 +197,10 @@ impl<T: Clone> CircBuf<T> {
     pub fn clear(&mut self) {
         self.head = 0;
         self.tail = 0;
-        self.full = false;
+        // A zero-capacity buffer is full: append has nowhere to write.
+        // Clearing must keep that, or the next append indexes `storage[0]`
+        // and panics instead of returning `OutOfMemory`.
+        self.full = self.storage.is_empty();
     }
 
     /// Iterate over the circular buffer.
@@ -952,5 +955,25 @@ mod tests {
         // Verify data is unchanged
         let mut it = buf.iterator(Direction::Forward);
         assert_eq!(b'h', *it.next().unwrap());
+    }
+
+    /// A zero-capacity buffer stays full across `clear`. `init(0)` starts
+    /// full, and `resize(0)` does too; `clear` must not drop that, or
+    /// `append` panics on an empty `storage` instead of returning
+    /// `OutOfMemory` (Zig: `CircBuf clear zero capacity`).
+    #[test]
+    fn circ_buf_clear_zero_capacity() {
+        let mut buf = Buf::init(0, 0);
+        assert!(buf.full);
+        buf.clear();
+        assert!(buf.full);
+        assert_eq!(Err(Error::OutOfMemory), buf.append(1));
+
+        let mut buf = Buf::init(4, 0);
+        buf.resize(0);
+        assert!(buf.full);
+        buf.clear();
+        assert!(buf.full);
+        assert_eq!(Err(Error::OutOfMemory), buf.append(1));
     }
 }
